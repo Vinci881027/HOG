@@ -1,2 +1,1 @@
-# HOG
-Histogram of Oriented Gradients (HOG)
+# Histogram of Oriented Gradients (HOG)
