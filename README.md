@@ -41,7 +41,7 @@ The HOG descriptors focused on the structure or the shape of an object. This met
 
 ## Schedule
 * Planning phase (6 weeks from 9/19 to 10/31): Study domain knowledge
-* Week 1 (10/31): Setup C++ and Python environment
+* Week 1 (10/31): Setup C++ environment
 * Week 2 (11/7): Image preprocessing 
 * Week 3 (11/14): Implement the gradient of image
 * Week 4 (11/21): Implement HOG in 8x8 and block normalization in 16x16
