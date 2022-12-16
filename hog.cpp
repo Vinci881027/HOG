@@ -1,5 +1,3 @@
-#include <vector>
-#include <string>
 #include <cmath>
 #include "hog.hpp"
 
@@ -20,16 +18,19 @@ HOG::HOG(cv::Mat &img, int cellSize, int binSize)
 	_maxMag = 0;
 }
 
-cv::Mat HOG::run()
+std::vector<std::vector<double> > HOG::run(std::string outputFile)
 {
 	int height = _img.rows;
 	int width = _img.cols;
 	int cellHeight = height / _cellSize;
 	int cellWidth = width / _cellSize;
+
 	cv::Mat gx, gy, gradMag, gradAngle, cellMag, cellAngle;
 	cv::Mat img = cv::Mat(height, width, CV_64F, double(0));
 
-	std::vector<std::vector<std::vector<double> > > cellGradVector(cellHeight, std::vector<std::vector<double> >(cellWidth, std::vector<double>(_binSize, 0)));
+	std::vector<std::vector<std::vector<double> > > cellGradVec(cellHeight, std::vector<std::vector<double> >(cellWidth, std::vector<double>(_binSize, 0)));
+	std::vector<std::vector<double> > featureVec;
+	std::vector<double> blockVec;
 
 	// Calculate the gradient of images
 	cv::Sobel(_img, gx, CV_64F, 1, 0, 5);
@@ -47,20 +48,49 @@ cv::Mat HOG::run()
 	}
 
 	// Calculate histogram of gradients in cells
-	for (size_t i = 0; i < cellGradVector.size(); i++)
+	for (size_t i = 0; i < cellGradVec.size(); i++)
 	{
-		for (size_t j = 0; j < cellGradVector[i].size(); j++)
+		for (size_t j = 0; j < cellGradVec[i].size(); j++)
 		{
 			cellMag = gradMag(cv::Range(i * _cellSize, (i + 1) * _cellSize), cv::Range(j * _cellSize, (j + 1) * _cellSize));
 			cellAngle = gradAngle(cv::Range(i * _cellSize, (i + 1) * _cellSize), cv::Range(j * _cellSize, (j + 1) * _cellSize));
-			cellGradVector[i][j] = cellGrad(cellMag, cellAngle);
+			cellGradVec[i][j] = cellGrad(cellMag, cellAngle);
 		}
 	}
 	
+	// Block normalization
+	for (size_t i = 0; i < cellGradVec.size() - 1; i++)
+	{
+		for (size_t j = 0; j < cellGradVec[i].size() - 1; j++)
+		{
+			blockVec.clear();
+			for (size_t k = 0; k < cellGradVec[i][j].size(); k++)
+			{
+				blockVec.push_back(cellGradVec[i][j][k]);
+			}
+			for (size_t k = 0; k < cellGradVec[i][j].size(); k++)
+			{
+				blockVec.push_back(cellGradVec[i][j + 1][k]);
+			}
+			for (size_t k = 0; k < cellGradVec[i][j].size(); k++)
+			{
+				blockVec.push_back(cellGradVec[i + 1][j][k]);
+			}
+			for (size_t k = 0; k < cellGradVec[i][j].size(); k++)
+			{
+				blockVec.push_back(cellGradVec[i + 1][j + 1][k]);
+			}
+
+			blockVec = blockNorm(blockVec);
+			featureVec.push_back(blockVec);
+		}
+	}
+
 	// Render the gradient
-	img = renderGrad(img, cellGradVector);
-	
-	return img;
+	img = renderGrad(img, cellGradVec);
+	cv::imwrite(outputFile, img);
+
+	return featureVec;
 }
 
 std::vector<double> HOG::cellGrad(cv::Mat &cellMag, cv::Mat &cellAngle)
@@ -92,30 +122,54 @@ std::vector<double> HOG::cellGrad(cv::Mat &cellMag, cv::Mat &cellAngle)
 	return bins;
 }
 
-cv::Mat HOG::renderGrad(cv::Mat &img, std::vector<std::vector<std::vector<double> > > &cellGradVector)
+std::vector<double> HOG::blockNorm(std::vector<double> &blockVec)
+{
+	double mag = 0;
+
+	// Count the magnitude of a block
+	for (size_t i = 0; i < blockVec.size(); i++)
+	{
+		mag += pow(blockVec[i], 2);
+	}
+	mag = sqrt(mag);
+
+	// Normalization
+	if (mag > 0)
+	{
+		for (size_t i = 0; i < blockVec.size(); i++)
+		{
+			blockVec[i] /= mag;
+		}
+	}
+
+	return blockVec;
+}
+
+cv::Mat HOG::renderGrad(cv::Mat &img, std::vector<std::vector<std::vector<double> > > &cellGradVec)
 {
 	int angle = 0;
 	int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
 	double angleRadian = 0;
 
-	for (size_t i = 0; i < cellGradVector.size(); i++)
+	for (size_t i = 0; i < cellGradVec.size(); i++)
 	{
-		for (size_t j = 0; j < cellGradVector[i].size(); j++)
+		for (size_t j = 0; j < cellGradVec[i].size(); j++)
 		{
 			angle = 0;
-			for (size_t k = 0; k < cellGradVector[i][j].size(); k++)
+			for (size_t k = 0; k < cellGradVec[i][j].size(); k++)
 			{
-				cellGradVector[i][j][k] /= _maxMag;
+				cellGradVec[i][j][k] /= _maxMag;
 				angleRadian = PI * (angle / PIANGLE);
-				x1 = static_cast<int>(j * _cellSize - _cellSize / 2 * cellGradVector[i][j][k] * cos(angleRadian));
-				y1 = static_cast<int>(i * _cellSize - _cellSize / 2 * cellGradVector[i][j][k] * sin(angleRadian));
-				x2 = static_cast<int>(j * _cellSize + _cellSize / 2 * cellGradVector[i][j][k] * cos(angleRadian));
-				y2 = static_cast<int>(i * _cellSize + _cellSize / 2 * cellGradVector[i][j][k] * sin(angleRadian));
-				cv::line(img, cv::Point(x1, y1), cv::Point(x2, y2), static_cast<int>(255 * cellGradVector[i][j][k]));
+				x1 = static_cast<int>(j * _cellSize - _cellSize / 2 * cellGradVec[i][j][k] * cos(angleRadian));
+				y1 = static_cast<int>(i * _cellSize - _cellSize / 2 * cellGradVec[i][j][k] * sin(angleRadian));
+				x2 = static_cast<int>(j * _cellSize + _cellSize / 2 * cellGradVec[i][j][k] * cos(angleRadian));
+				y2 = static_cast<int>(i * _cellSize + _cellSize / 2 * cellGradVec[i][j][k] * sin(angleRadian));
+				cv::line(img, cv::Point(x1, y1), cv::Point(x2, y2), static_cast<int>(255 * cellGradVec[i][j][k]));
 
 				angle += _binRange;
 			}
 		}
 	}
+
 	return img;
 }
